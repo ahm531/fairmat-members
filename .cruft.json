@@ -1,0 +1,34 @@
+{
+  "template": "https://github.com/FAIRmat-NFDI/cookiecutter-nomad-plugin",
+  "commit": "970fdbb387269545102f25e6a16f7a7b422c9414",
+  "checkout": null,
+  "context": {
+    "cookiecutter": {
+      "full_name": "Ahmed Mansour",
+      "email": "amansour@physik.hu-berlin.de",
+      "github_username": "FAIRmat",
+      "plugin_name": "FAIRmat-members",
+      "module_name": "fairmat_members",
+      "short_description": "A NOMAD schema and app for managing a FAIRmat member directory, including principal investigators, staff members, collaborators, affiliations, expertise, and project roles.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "include_schema_package": true,
+      "include_normalizer": false,
+      "include_parser": true,
+      "include_app": true,
+      "include_example_uploads": false,
+      "include_action": false,
+      "include_api": false,
+      "include_north_tools": false,
+      "north_tool_name": "my_north_tool",
+      "include_citation_file": true,
+      "_copy_without_render": [
+        "*.html",
+        "*.png"
+      ],
+      "_template": "https://github.com/FAIRmat-NFDI/cookiecutter-nomad-plugin",
+      "_commit": "970fdbb387269545102f25e6a16f7a7b422c9414"
+    }
+  },
+  "directory": null
+}
