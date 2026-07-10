@@ -252,6 +252,153 @@ def _load_dataframe(mainfile: str):
     raise ValueError(f'Cannot decode {mainfile} with any supported encoding')
 
 
+def _prepare_dataframe(mainfile: str):
+    """Load and normalise the member spreadsheet into a DataFrame.
+
+    Drops fully-empty rows and strips surrounding whitespace from column
+    names.  Returns the DataFrame; raising on unreadable files is left to the
+    caller.
+    """
+    df = _load_dataframe(mainfile)
+    df = df.dropna(how='all')
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
+
+
+def _row_has_name(row) -> bool:
+    """A row is a member row iff it carries at least a first or last name."""
+    return bool(_gcol(row, _COL_LAST_NAME) or _gcol(row, _COL_FIRST_NAME))
+
+
+def _build_person_and_record(row):
+    """Build a ``(Person, MemberRecord, entry_name)`` tuple from one row.
+
+    Assumes the row has already passed ``_row_has_name``.  Kept free of any
+    archive/context side effects so it can be reused by both mainfile-key
+    generation and the actual parse.
+    """
+    last_name  = _gcol(row, _COL_LAST_NAME)
+    first_name = _gcol(row, _COL_FIRST_NAME)
+
+    email        = _gcol(row, _COL_EMAIL)
+    affil_raw    = _gcol(row, _COL_AFFILIATION)
+    ror_raw      = _gcol(row, _COL_AFFILIATION_ROR)
+    city_raw     = _gcol(row, _COL_CITY)
+    country_raw  = _gcol(row, _COL_COUNTRY)
+    mtype_raw    = _gcol(row, _COL_MEMBER_TYPE)
+    area_ldr_raw = _gcol(row, _COL_AREA_LEADER)
+    dep_al_raw   = _gcol(row, _COL_DEPUTY_AL)
+    task_ldr_raw = _gcol(row, _COL_TASK_LEADER)
+    part_raw     = _gcol(row, _COL_PARTICIPANT)
+    member_raw   = _gcol(row, _COL_MEMBER)
+    notes        = _gcol(row, _COL_NOTES)
+    meet_raw     = _gcol(row, _COL_INVITE_MEETING)
+    retreat_raw  = _gcol(row, _COL_INVITE_RETREAT)
+    reimb_raw    = _gcol(row, _COL_REIMBURSEMENT)
+    main_mail    = _gcol(row, _COL_MAIN_MAIL)
+    orcid        = _gcol(row, _COL_ORCID)
+
+    # -- Affiliation (cols D, E, F, G) ----------------------------------
+    affiliations = []
+    if affil_raw or ror_raw or city_raw or country_raw:
+        affiliations = [Affiliation(
+            institution_name=affil_raw or None,
+            ror_id=ror_raw or None,
+            city=city_raw or None,
+            country=country_raw or None,
+        )]
+
+    # -- Member type (col H) --------------------------------------------
+    member_type = _parse_member_type(mtype_raw)
+
+    # -- FAIRmat roles (cols I–M) ----------------------------------------
+    fairmat_roles = []
+
+    # Col I: Area Leader
+    if area_ldr_raw:
+        fairmat_roles.append(FAIRmatRoleAssignment(
+            role='Area Leader',
+            area=_extract_area(area_ldr_raw),
+        ))
+
+    # Col J: Deputy Area Leader
+    if dep_al_raw:
+        fairmat_roles.append(FAIRmatRoleAssignment(
+            role='Deputy Area Leader',
+            area=_extract_area(dep_al_raw),
+        ))
+
+    # Col K: Task Leader (single task; area extracted from task code)
+    if task_ldr_raw:
+        fairmat_roles.append(FAIRmatRoleAssignment(
+            role='Task Leader',
+            task=task_ldr_raw,
+            area=_extract_area(task_ldr_raw),
+        ))
+
+    # Col L: Participant (comma-separated tasks; one subsection each)
+    for task in _split_csv(part_raw):
+        fairmat_roles.append(FAIRmatRoleAssignment(
+            role='Participant',
+            task=task,
+            area=_extract_area(task),
+        ))
+
+    # Col M: Member (comma-separated area codes; one subsection each)
+    for area_raw in _split_csv(member_raw):
+        area = _extract_area(area_raw)
+        if area:
+            fairmat_roles.append(FAIRmatRoleAssignment(
+                role='Member',
+                area=area,
+            ))
+
+    # -- Primary mailing list from 'Main Mail' column (col T) -----------
+    mailing_lists = []
+    canonical_mail = _parse_main_mail(main_mail)
+    if canonical_mail:
+        mailing_lists = [canonical_mail]
+
+    # -- Event invitation & reimbursement -------------------------------
+    invited = _parse_invited_to(meet_raw, retreat_raw)
+    reimb   = _parse_reimbursement(reimb_raw)
+    event_invitation = None
+    if invited or reimb:
+        event_invitation = EventInvitation(
+            invited_to=invited,
+            reimbursement=reimb,
+        )
+
+    person = Person(
+        first_name=first_name or None,
+        last_name=last_name or None,
+        email=email or None,
+        orcid=orcid or None,
+        member_type=member_type,
+        notes=notes or None,
+        affiliations=affiliations,
+        fairmat_roles=fairmat_roles,
+        mailing_lists=mailing_lists if mailing_lists else None,
+        event_invitation=event_invitation,
+    )
+
+    first_role = fairmat_roles[0] if fairmat_roles else None
+    record = MemberRecord(
+        first_name=first_name or None,
+        last_name=last_name or None,
+        email=email or None,
+        orcid=orcid or None,
+        institution_name=affil_raw or None,
+        role=first_role.role if first_role else None,
+        area=first_role.area if first_role else None,
+        mailing_lists=mailing_lists if mailing_lists else None,
+        notes=notes or None,
+    )
+
+    entry_name = f'{first_name} {last_name}'.strip() or 'FAIRmat member'
+    return person, record, entry_name
+
+
 # ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
@@ -261,20 +408,48 @@ class FAIRmatMembersParser(MatchingParser):
     """
     Parses a FAIRmat member directory Excel or CSV file.
 
-    Each row that contains at least a first or last name produces one
-    ``Person`` child archive entry (``member_<Last>_<First>.archive.yaml``).
+    The spreadsheet (the *mainfile*) becomes a ``FAIRmatMembersFile`` summary
+    entry.  In addition, each row that contains at least a first or last name is
+    written out as its own ``member_<Last>_<First>.archive.yaml`` raw file
+    holding a ``Person``.  Those files are then processed by NOMAD's built-in
+    archive parser, producing individual, editable ``Person`` entries that can
+    each be downloaded as a single ``.archive.yaml`` file.
+
+    Guard against self-matching
+    ---------------------------
+    The generated ``*.archive.yaml`` files must be picked up by the archive
+    parser, NOT by this parser again.  During matching, plugin parsers are
+    checked before the archive parser, so ``is_mainfile`` is overridden to
+    explicitly refuse any ``.archive.(yaml|yml|json)`` file.  Without this guard
+    a generated child could be re-matched here and overwritten with an empty
+    ``FAIRmatMembersFile``, which previously made the entries render blank.
     """
 
-    def parse(  # noqa: C901, PLR0912, PLR0915
+    # Files this parser must never claim (they belong to the archive parser).
+    _ARCHIVE_SUFFIX_RE = re.compile(r'(?i)\.archive\.(ya?ml|json)$')
+
+    def is_mainfile(
+        self,
+        filename: str,
+        mime: str,
+        buffer: bytes,
+        decoded_buffer: str,
+        compression: str | None = None,
+    ):
+        # Never claim archive files – those are the children we generate.
+        if self._ARCHIVE_SUFFIX_RE.search(filename):
+            return False
+        return super().is_mainfile(
+            filename, mime, buffer, decoded_buffer, compression
+        )
+
+    def parse(
         self,
         mainfile: str,
         archive: EntryArchive,
         logger: BoundLogger,
         child_archives: dict[str, EntryArchive] = None,
     ) -> None:
-        # ----------------------------------------------------------------
-        # Requirement 8: log path, size, and file type before any I/O
-        # ----------------------------------------------------------------
         file_size = os.path.getsize(mainfile) if os.path.exists(mainfile) else -1
         is_excel  = mainfile.lower().endswith(('.xlsx', '.xls'))
         file_type = 'Excel' if is_excel else 'CSV'
@@ -286,201 +461,86 @@ class FAIRmatMembersParser(MatchingParser):
         )
 
         try:
-            df = _load_dataframe(mainfile)
+            df = _prepare_dataframe(mainfile)
         except Exception as exc:
             logger.error('Failed to load file', exc_info=exc)
             return
 
-        # Normalise column names (strip surrounding whitespace)
-        df = df.dropna(how='all')
-        df.columns = [str(c).strip() for c in df.columns]
         logger.info('rows loaded', count=len(df), file_type=file_type)
 
         created = 0
         skipped = 0
-        used_filenames: set[str] = set()
         member_records = []
+        used_filenames: set[str] = set()
 
         for idx, row in df.iterrows():
-            last_name  = _gcol(row, _COL_LAST_NAME)
-            first_name = _gcol(row, _COL_FIRST_NAME)
-
-            # Skip rows without any name
-            if not last_name and not first_name:
+            if not _row_has_name(row):
                 skipped += 1
                 continue
 
-            email        = _gcol(row, _COL_EMAIL)
-            affil_raw    = _gcol(row, _COL_AFFILIATION)
-            ror_raw      = _gcol(row, _COL_AFFILIATION_ROR)
-            city_raw     = _gcol(row, _COL_CITY)
-            country_raw  = _gcol(row, _COL_COUNTRY)
-            mtype_raw    = _gcol(row, _COL_MEMBER_TYPE)
-            area_ldr_raw = _gcol(row, _COL_AREA_LEADER)
-            dep_al_raw   = _gcol(row, _COL_DEPUTY_AL)
-            task_ldr_raw = _gcol(row, _COL_TASK_LEADER)
-            part_raw     = _gcol(row, _COL_PARTICIPANT)
-            member_raw   = _gcol(row, _COL_MEMBER)
-            notes        = _gcol(row, _COL_NOTES)
-            meet_raw     = _gcol(row, _COL_INVITE_MEETING)
-            retreat_raw  = _gcol(row, _COL_INVITE_RETREAT)
-            reimb_raw    = _gcol(row, _COL_REIMBURSEMENT)
-            main_mail    = _gcol(row, _COL_MAIN_MAIL)
-            orcid        = _gcol(row, _COL_ORCID)
+            person, record, entry_name = _build_person_and_record(row)
+            member_records.append(record)
 
-            # -- Affiliation (cols D, E, F, G) ------------------------------
-            affiliations = []
-            if affil_raw or ror_raw or city_raw or country_raw:
-                affiliations = [Affiliation(
-                    institution_name=affil_raw or None,
-                    ror_id=ror_raw or None,
-                    city=city_raw or None,
-                    country=country_raw or None,
-                )]
-
-            # -- Member type (col H) ----------------------------------------
-            member_type = _parse_member_type(mtype_raw)
-            if mtype_raw and member_type is None:
-                logger.warning('Unknown member type', row=idx, raw=mtype_raw)
-
-            # -- FAIRmat roles (cols I–M) ------------------------------------
-            fairmat_roles = []
-
-            # Col I: Area Leader
-            if area_ldr_raw:
-                fairmat_roles.append(FAIRmatRoleAssignment(
-                    role='Area Leader',
-                    area=_extract_area(area_ldr_raw),
-                ))
-
-            # Col J: Deputy Area Leader
-            if dep_al_raw:
-                fairmat_roles.append(FAIRmatRoleAssignment(
-                    role='Deputy Area Leader',
-                    area=_extract_area(dep_al_raw),
-                ))
-
-            # Col K: Task Leader (single task; area extracted from task code)
-            if task_ldr_raw:
-                fairmat_roles.append(FAIRmatRoleAssignment(
-                    role='Task Leader',
-                    task=task_ldr_raw,
-                    area=_extract_area(task_ldr_raw),
-                ))
-
-            # Col L: Participant (comma-separated tasks; one subsection each)
-            for task in _split_csv(part_raw):
-                fairmat_roles.append(FAIRmatRoleAssignment(
-                    role='Participant',
-                    task=task,
-                    area=_extract_area(task),
-                ))
-
-            # Col M: Member (comma-separated area codes; one subsection each)
-            for area_raw in _split_csv(member_raw):
-                area = _extract_area(area_raw)
-                if area:
-                    fairmat_roles.append(FAIRmatRoleAssignment(
-                        role='Member',
-                        area=area,
-                    ))
-
-            # -- Primary mailing list from 'Main Mail' column (col T) -------
-            mailing_lists = []
-            canonical_mail = _parse_main_mail(main_mail)
-            if canonical_mail:
-                mailing_lists = [canonical_mail]
-
-            # -- Event invitation & reimbursement ---------------------------
-            invited = _parse_invited_to(meet_raw, retreat_raw)
-            reimb   = _parse_reimbursement(reimb_raw)
-            event_invitation = None
-            if invited or reimb:
-                event_invitation = EventInvitation(
-                    invited_to=invited,
-                    reimbursement=reimb,
-                )
-
-            # -- Assemble Person -------------------------------------------
-            person = Person(
-                first_name=first_name or None,
-                last_name=last_name or None,
-                email=email or None,
-                orcid=orcid or None,
-                member_type=member_type,
-                notes=notes or None,
-                affiliations=affiliations,
-                fairmat_roles=fairmat_roles,
-                mailing_lists=mailing_lists if mailing_lists else None,
-                event_invitation=event_invitation,
-            )
-
-            # -- Collect a lightweight record for archive.data -------------
-            first_role = fairmat_roles[0] if fairmat_roles else None
-            member_records.append(MemberRecord(
-                first_name=first_name or None,
-                last_name=last_name or None,
-                email=email or None,
-                orcid=orcid or None,
-                institution_name=affil_raw or None,
-                role=first_role.role if first_role else None,
-                area=first_role.area if first_role else None,
-                mailing_lists=mailing_lists if mailing_lists else None,
-                notes=notes or None,
-            ))
-
-            # -- Child archive filename (unique, collision-safe) -----------
-            safe_last  = re.sub(r'[^\w]', '_', last_name)[:30]
-            safe_first = re.sub(r'[^\w]', '_', first_name)[:20]
-            base       = f'member_{safe_last}_{safe_first}'
-            filename   = f'{base}.archive.yaml'
-            if filename in used_filenames:
-                filename = f'{base}_{idx}.archive.yaml'
-            used_filenames.add(filename)
-
-            entry_name = f'{first_name} {last_name}'.strip() or f'Member row {idx}'
-
-            child_archive = EA(
-                data=person,
-                m_context=archive.m_context,
-                metadata=EntryMetadata(
-                    upload_id=archive.m_context.upload_id,
-                    entry_name=entry_name,
-                ),
-            )
-
-            try:
-                # --- Serialise BEFORE opening the file -------------------
-                # Opening with 'w' immediately truncates the file to 0 bytes.
-                # If m_to_dict() or yaml.dump() were called INSIDE the open
-                # context and raised an exception, the file would remain at
-                # 0 bytes.  Pre-computing the YAML string prevents that.
-                yaml_str = _yaml.dump(
-                    child_archive.m_to_dict(),
-                    default_flow_style=False,
-                    allow_unicode=True,
-                )
-            except Exception as exc:
-                logger.error(
-                    'Failed to serialise child entry',
-                    row=idx, name=entry_name, exc_info=exc,
-                )
-                continue
-
-            try:
-                with archive.m_context.raw_file(filename, 'w') as outfile:
-                    outfile.write(yaml_str)
-                archive.m_context.process_updated_raw_file(
-                    filename, allow_modify=True
-                )
-                logger.info('created member entry', row=idx, name=entry_name)
+            filename = self._child_filename(record, idx, used_filenames)
+            if self._write_child(archive, filename, person, entry_name, logger):
                 created += 1
-            except Exception as exc:
-                logger.error('Failed to write child entry', row=idx, name=entry_name, exc_info=exc)
 
+        # The mainfile entry itself carries the lightweight summary.
         archive.data = FAIRmatMembersFile(members=member_records)
         logger.info(
             'FAIRmatMembersParser done',
             created=created,
             skipped=skipped,
         )
+
+    @staticmethod
+    def _child_filename(record, idx, used_filenames: set[str]) -> str:
+        """Build a unique, collision-safe ``member_*.archive.yaml`` filename."""
+        safe_last  = re.sub(r'[^\w]', '_', record.last_name or '')[:30]
+        safe_first = re.sub(r'[^\w]', '_', record.first_name or '')[:20]
+        base       = f'member_{safe_last}_{safe_first}'.strip('_') or f'member_{idx}'
+        filename   = f'{base}.archive.yaml'
+        if filename in used_filenames:
+            filename = f'{base}_{idx}.archive.yaml'
+        used_filenames.add(filename)
+        return filename
+
+    @staticmethod
+    def _write_child(archive, filename, person, entry_name, logger) -> bool:
+        """Write one Person as a raw ``.archive.yaml`` file and register it.
+
+        Returns True on success.  The archive parser will subsequently turn the
+        file into an individual, editable ``Person`` entry.
+        """
+        child = EA(
+            data=person,
+            m_context=archive.m_context,
+            metadata=EntryMetadata(entry_name=entry_name),
+        )
+        try:
+            # Serialise BEFORE opening the file: opening with 'w' truncates it
+            # to 0 bytes, so a serialisation error must not leave an empty file.
+            yaml_str = _yaml.dump(
+                child.m_to_dict(),
+                default_flow_style=False,
+                allow_unicode=True,
+            )
+        except Exception as exc:
+            logger.error(
+                'Failed to serialise child entry',
+                file=filename, name=entry_name, exc_info=exc,
+            )
+            return False
+
+        try:
+            with archive.m_context.raw_file(filename, 'w') as outfile:
+                outfile.write(yaml_str)
+            archive.m_context.process_updated_raw_file(filename, allow_modify=True)
+            logger.info('created member entry', file=filename, name=entry_name)
+            return True
+        except Exception as exc:
+            logger.error(
+                'Failed to write child entry',
+                file=filename, name=entry_name, exc_info=exc,
+            )
+            return False

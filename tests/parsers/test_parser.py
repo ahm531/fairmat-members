@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import os
-import tempfile
 
 import pytest
 from nomad.datamodel import EntryArchive
@@ -50,6 +49,54 @@ def test_parse_csv(sample_csv, tmp_path):
 
     assert archive.data is not None, 'archive.data should be set after parsing'
     assert len(archive.data.members) >= 1, 'at least one MemberRecord expected'
+
+
+def test_is_mainfile_refuses_archive_files():
+    """The parser must never claim generated *.archive.yaml files; those are
+    handled by the built-in archive parser."""
+    parser = FAIRmatMembersParser()
+    # A members spreadsheet is claimed...
+    assert parser.is_mainfile('members.csv', 'text/csv', b'', '') is not False
+    # ...but generated child archive files are refused.
+    for name in (
+        'member_Doe_Jane.archive.yaml',
+        'member_Smith_John.archive.yml',
+        'member_x.archive.json',
+    ):
+        assert parser.is_mainfile(name, 'text/yaml', b'', '') is False
+
+
+def test_children_written_as_person_yaml(sample_csv, tmp_path):
+    """Each named row is written as a member_*.archive.yaml raw file holding a
+    Person (not an empty container)."""
+    import glob
+
+    import yaml
+
+    context = ClientContext(local_dir=str(tmp_path))
+    archive = EntryArchive(m_context=context)
+    FAIRmatMembersParser().parse(sample_csv, archive, logging.getLogger('test'))
+
+    # Summary entry on the mainfile
+    assert archive.data.m_def.name == 'FAIRmatMembersFile'
+    assert len(archive.data.members) == 2
+
+    # Two per-member archive files were written
+    child_files = sorted(glob.glob(str(tmp_path / 'member_*.archive.yaml')))
+    assert len(child_files) == 2
+
+    # Each holds a populated Person under data.m_def
+    people = {}
+    for path in child_files:
+        with open(path, encoding='utf-8') as f:
+            doc = yaml.safe_load(f)
+        assert doc['data']['m_def'].endswith('Person')
+        people[doc['data'].get('last_name')] = doc
+
+    assert 'Doe' in people
+    assert people['Doe']['data']['first_name'] == 'Jane'
+    assert people['Doe']['data']['member_type'] == 'PI'
+    assert people['Doe']['metadata']['entry_name'] == 'Jane Doe'
 
 
 def test_mainfile_not_modified(sample_csv, tmp_path):

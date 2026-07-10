@@ -39,7 +39,7 @@ dev = [
     "pytest",
     "structlog",
     "mkdocs",
-    "mkdocs-material==8.1.1",
+    "mkdocs-material>=9.5",
     "pymdown-extensions",
     "mkdocs-click",
     "pytest-asyncio",
@@ -108,6 +108,7 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["PLC0415"] # import-outside-top-level
+"tests/**" = ["PLR2004"] # magic values are fine in test assertions
 
 # this is entirely optional, you can remove this if you wish to
 [tool.ruff.format]

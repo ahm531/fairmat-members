@@ -391,6 +391,16 @@ class Person(Schema):
     def normalize(self, archive: 'EntryArchive', logger: 'BoundLogger') -> None:
         super().normalize(archive, logger)
 
+        # Derive the entry name from the person's name so it stays meaningful
+        # regardless of how the entry was created or edited.  Without this, a
+        # GUI edit + save drops the parser-provided entry_name and NOMAD falls
+        # back to the raw mainfile name (e.g. 'member_Last_First.archive.yaml').
+        display_name = ' '.join(
+            part for part in (self.first_name, self.last_name) if part
+        ).strip()
+        if display_name and archive.metadata is not None:
+            archive.metadata.entry_name = display_name
+
 
 # ---------------------------------------------------------------------------
 # Container schemas produced by parsers
