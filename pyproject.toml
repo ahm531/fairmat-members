@@ -25,7 +25,9 @@ maintainers = [
 ]
 license = { file = "LICENSE" }
 dependencies = [
-    "nomad-lab>=1.4.1"
+    "nomad-lab>=1.4.1",
+    "openpyxl>=3.1",
+    "pandas>=2.0",
 ]
 
 [project.urls]
