@@ -31,7 +31,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/FAIRmat/FAIRmat-members"
+Repository = "https://github.com/ahm531/fairmat-members"
 
 [project.optional-dependencies]
 dev = [
