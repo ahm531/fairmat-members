@@ -24,17 +24,17 @@ Expected CSV column headers (new format)
   ORCID                         – U: orcid
 
 Each non-empty row (with at least a first or last name) creates one individual
-``Person`` child archive entry (``member_<Last>_<First>.archive.yaml``).
+``Person`` child archive entry (``member_<Last>_<First>.archive.json``).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
 from typing import TYPE_CHECKING
 
-import yaml as _yaml
 from nomad.datamodel import EntryArchive as EA
 from nomad.datamodel import EntryMetadata
 from nomad.parsing.parser import MatchingParser
@@ -410,14 +410,14 @@ class FAIRmatMembersParser(MatchingParser):
 
     The spreadsheet (the *mainfile*) becomes a ``FAIRmatMembersFile`` summary
     entry.  In addition, each row that contains at least a first or last name is
-    written out as its own ``member_<Last>_<First>.archive.yaml`` raw file
+    written out as its own ``member_<Last>_<First>.archive.json`` raw file
     holding a ``Person``.  Those files are then processed by NOMAD's built-in
     archive parser, producing individual, editable ``Person`` entries that can
-    each be downloaded as a single ``.archive.yaml`` file.
+    each be downloaded as a single ``.archive.json`` file.
 
     Guard against self-matching
     ---------------------------
-    The generated ``*.archive.yaml`` files must be picked up by the archive
+    The generated ``*.archive.json`` files must be picked up by the archive
     parser, NOT by this parser again.  During matching, plugin parsers are
     checked before the archive parser, so ``is_mainfile`` is overridden to
     explicitly refuse any ``.archive.(yaml|yml|json)`` file.  Without this guard
@@ -495,19 +495,19 @@ class FAIRmatMembersParser(MatchingParser):
 
     @staticmethod
     def _child_filename(record, idx, used_filenames: set[str]) -> str:
-        """Build a unique, collision-safe ``member_*.archive.yaml`` filename."""
+        """Build a unique, collision-safe ``member_*.archive.json`` filename."""
         safe_last  = re.sub(r'[^\w]', '_', record.last_name or '')[:30]
         safe_first = re.sub(r'[^\w]', '_', record.first_name or '')[:20]
         base       = f'member_{safe_last}_{safe_first}'.strip('_') or f'member_{idx}'
-        filename   = f'{base}.archive.yaml'
+        filename   = f'{base}.archive.json'
         if filename in used_filenames:
-            filename = f'{base}_{idx}.archive.yaml'
+            filename = f'{base}_{idx}.archive.json'
         used_filenames.add(filename)
         return filename
 
     @staticmethod
     def _write_child(archive, filename, person, entry_name, logger) -> bool:
-        """Write one Person as a raw ``.archive.yaml`` file and register it.
+        """Write one Person as a raw ``.archive.json`` file and register it.
 
         Returns True on success.  The archive parser will subsequently turn the
         file into an individual, editable ``Person`` entry.
@@ -520,10 +520,10 @@ class FAIRmatMembersParser(MatchingParser):
         try:
             # Serialise BEFORE opening the file: opening with 'w' truncates it
             # to 0 bytes, so a serialisation error must not leave an empty file.
-            yaml_str = _yaml.dump(
+            json_str = json.dumps(
                 child.m_to_dict(),
-                default_flow_style=False,
-                allow_unicode=True,
+                indent=2,
+                ensure_ascii=False,
             )
         except Exception as exc:
             logger.error(
@@ -534,7 +534,7 @@ class FAIRmatMembersParser(MatchingParser):
 
         try:
             with archive.m_context.raw_file(filename, 'w') as outfile:
-                outfile.write(yaml_str)
+                outfile.write(json_str)
             archive.m_context.process_updated_raw_file(filename, allow_modify=True)
             logger.info('created member entry', file=filename, name=entry_name)
             return True

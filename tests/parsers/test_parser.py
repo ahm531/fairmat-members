@@ -66,12 +66,11 @@ def test_is_mainfile_refuses_archive_files():
         assert parser.is_mainfile(name, 'text/yaml', b'', '') is False
 
 
-def test_children_written_as_person_yaml(sample_csv, tmp_path):
-    """Each named row is written as a member_*.archive.yaml raw file holding a
+def test_children_written_as_person_json(sample_csv, tmp_path):
+    """Each named row is written as a member_*.archive.json raw file holding a
     Person (not an empty container)."""
     import glob
-
-    import yaml
+    import json
 
     context = ClientContext(local_dir=str(tmp_path))
     archive = EntryArchive(m_context=context)
@@ -82,14 +81,14 @@ def test_children_written_as_person_yaml(sample_csv, tmp_path):
     assert len(archive.data.members) == 2
 
     # Two per-member archive files were written
-    child_files = sorted(glob.glob(str(tmp_path / 'member_*.archive.yaml')))
+    child_files = sorted(glob.glob(str(tmp_path / 'member_*.archive.json')))
     assert len(child_files) == 2
 
     # Each holds a populated Person under data.m_def
     people = {}
     for path in child_files:
         with open(path, encoding='utf-8') as f:
-            doc = yaml.safe_load(f)
+            doc = json.load(f)
         assert doc['data']['m_def'].endswith('Person')
         people[doc['data'].get('last_name')] = doc
 
