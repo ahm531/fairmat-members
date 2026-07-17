@@ -28,6 +28,7 @@ dependencies = [
     "nomad-lab>=1.4.1",
     "openpyxl>=3.1",
     "pandas>=2.0",
+    "FAIRmat-onboarding @ git+https://github.com/FAIRmat-NFDI/fairmat_onboarding.git",
 ]
 
 [project.urls]

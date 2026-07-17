@@ -4,6 +4,9 @@ if TYPE_CHECKING:
     from nomad.datamodel.datamodel import EntryArchive
     from structlog.stdlib import BoundLogger
 
+from fairmat_onboarding.schema_packages.schema_package import (
+    PIOnboardingQuestionnaire,
+)
 from nomad.config import config
 from nomad.datamodel.data import ArchiveSection, Schema, UseCaseElnCategory
 from nomad.datamodel.metainfo.annotations import ELNAnnotation, ELNComponentEnum
@@ -349,12 +352,15 @@ class Person(Schema):
         a_eln=ELNAnnotation(component=ELNComponentEnum.StringEditQuantity),
     )
 
-    onboarding_entry = Quantity(
-        type=ArchiveSection,
-        label='Onboarding entry',
+    onboarding_entries = Quantity(
+        type=PIOnboardingQuestionnaire,
+        shape=['*'],
+        label='Onboarding entries',
         description=(
-            'Reference to the PI onboarding questionnaire entry in NOMAD. '
-            'Applicable for PI members only.'
+            'References to the PI onboarding questionnaire entries of this '
+            'member. Filled automatically during processing by matching the '
+            'member email against the NOMAD (Keycloak) account that created '
+            'the questionnaire; additional entries can be linked manually.'
         ),
         a_eln=ELNAnnotation(component=ELNComponentEnum.ReferenceEditQuantity),
     )
@@ -436,8 +442,74 @@ class Person(Schema):
         a_eln=ELNAnnotation(component=ELNComponentEnum.StringEditQuantity),
     )
 
+    def _find_onboarding_entries(self, archive, logger) -> list[str]:
+        """Find all PIOnboardingQuestionnaire entries created by this member.
+
+        The member's email is resolved to a NOMAD (Keycloak) account and the
+        entry index is searched for questionnaires whose main author has that
+        user_id.  Runs only server-side; in client/test contexts the lookup
+        is skipped silently.  Questionnaires uploaded on behalf of a member
+        carry the uploader's user_id and are NOT found — link those manually
+        until the schemas carry an explicit user_id quantity.
+        """
+        if not self.email:
+            return []
+        try:
+            from nomad.datamodel import User
+            from nomad.search import search
+
+            user = User.get(email=self.email.strip().lower())
+            if user is None or not user.user_id:
+                logger.info(
+                    'no NOMAD account found for member email; '
+                    'onboarding entries not linked',
+                    member_email=self.email,
+                )
+                return []
+
+            searcher_id = None
+            if archive.metadata is not None and archive.metadata.main_author:
+                searcher_id = archive.metadata.main_author.user_id
+            results = search(
+                owner='all',
+                query={
+                    'section_defs.definition_qualified_name': (
+                        'fairmat_onboarding.schema_packages.'
+                        'schema_package.PIOnboardingQuestionnaire'
+                    ),
+                    'main_author.user_id': user.user_id,
+                },
+                user_id=searcher_id,
+            )
+            return [
+                f'../uploads/{entry["upload_id"]}/archive/{entry["entry_id"]}#/data'
+                for entry in results.data
+            ]
+        except Exception as exc:
+            logger.info(
+                'onboarding entry lookup skipped',
+                member_email=self.email,
+                reason=str(exc),
+            )
+            return []
+
     def normalize(self, archive: 'EntryArchive', logger: 'BoundLogger') -> None:
         super().normalize(archive, logger)
+
+        # Link all onboarding questionnaires of this member (matched via the
+        # Keycloak user_id behind the member email).  Manually added
+        # references are kept; discovered ones are merged in.
+        existing = {
+            getattr(ref, 'm_proxy_value', None)
+            for ref in (self.onboarding_entries or [])
+        }
+        discovered = [
+            url
+            for url in self._find_onboarding_entries(archive, logger)
+            if url not in existing
+        ]
+        if discovered:
+            self.onboarding_entries = list(self.onboarding_entries or []) + discovered
 
         # Mirror list quantities into the hidden *_terms subsections so the
         # app can search and display them via a scalar `value` path.
