@@ -1,4 +1,4 @@
-# Welcome to the `FAIRmat-members` documentation
+# Welcome to the `fairmat-members` documentation
 
 A NOMAD schema and app for managing a FAIRmat member directory, including principal investigators, staff members, collaborators, affiliations, expertise, and project roles.
 

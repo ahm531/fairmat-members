@@ -12,7 +12,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
 ]
-name = "FAIRmat-members"
+name = "fairmat-members"
 description = "A NOMAD schema and app for managing a FAIRmat member directory, including principal investigators, staff members, collaborators, affiliations, expertise, and project roles."
 version = "0.1.0"
 readme = "README.md"
