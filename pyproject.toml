@@ -28,10 +28,11 @@ dependencies = [
     "nomad-lab>=1.4.1",
     "openpyxl>=3.1",
     "pandas>=2.0",
+    "FAIRmat-onboarding @ git+https://github.com/FAIRmat-NFDI/fairmat_onboarding.git",
 ]
 
 [project.urls]
-Repository = "https://github.com/FAIRmat/FAIRmat-members"
+Repository = "https://github.com/ahm531/fairmat-members"
 
 [project.optional-dependencies]
 dev = [
@@ -39,7 +40,7 @@ dev = [
     "pytest",
     "structlog",
     "mkdocs",
-    "mkdocs-material==8.1.1",
+    "mkdocs-material>=9.5",
     "pymdown-extensions",
     "mkdocs-click",
     "pytest-asyncio",
@@ -130,7 +131,6 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [project.entry-points.'nomad.plugin']
-parser_entry_point = "fairmat_members.parsers:parser_entry_point"
 schema_package_entry_point = "fairmat_members.schema_packages:schema_package_entry_point"
 
 app_entry_point = "fairmat_members.apps:app_entry_point"

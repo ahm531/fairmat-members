@@ -1,7 +1,6 @@
 from nomad.config.models.plugins import AppEntryPoint
 from nomad.config.models.ui import (
     App,
-    Axis,
     Column,
     Dashboard,
     Layout,
@@ -21,7 +20,7 @@ SCHEMA = 'fairmat_members.schema_packages.schema_package.Person'
 Q_LAST_NAME = f'data.last_name#{SCHEMA}'
 Q_FIRST_NAME = f'data.first_name#{SCHEMA}'
 Q_MEMBER_TYPE = f'data.member_type#{SCHEMA}'
-Q_EXPERTISE = f'data.expertise#{SCHEMA}'
+Q_EXPERTISE = f'data.expertise_terms.value#{SCHEMA}'
 Q_INSTITUTION = f'data.affiliations.institution_name#{SCHEMA}'
 Q_CITY = f'data.affiliations.city#{SCHEMA}'
 Q_COUNTRY = f'data.affiliations.country#{SCHEMA}'
@@ -29,7 +28,7 @@ Q_ROLE = f'data.fairmat_roles.role#{SCHEMA}'
 Q_AREA = f'data.fairmat_roles.area#{SCHEMA}'
 Q_PROJECT_NAME = f'data.external_projects.project_name#{SCHEMA}'
 Q_PROJECT_TYPE = f'data.external_projects.project_type#{SCHEMA}'
-Q_MAILING_LIST = f'data.mailing_lists#{SCHEMA}'
+Q_MAILING_LIST = f'data.mailing_list_terms.value#{SCHEMA}'
 
 # ---------------------------------------------------------------------------
 # App definition

@@ -128,3 +128,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Local-only data (member roster CSVs contain PII; this repo is public)
+# Keep working data in local/ — it is never committed or pushed.
+local/
+*.csv
+*.xlsx

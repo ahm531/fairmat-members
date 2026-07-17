@@ -4,6 +4,9 @@ if TYPE_CHECKING:
     from nomad.datamodel.datamodel import EntryArchive
     from structlog.stdlib import BoundLogger
 
+from fairmat_onboarding.schema_packages.schema_package import (
+    PIOnboardingQuestionnaire,
+)
 from nomad.config import config
 from nomad.datamodel.data import ArchiveSection, Schema, UseCaseElnCategory
 from nomad.datamodel.metainfo.annotations import ELNAnnotation, ELNComponentEnum
@@ -69,7 +72,11 @@ PROJECT_TYPE = MEnum(
     'Other',
 )
 
-MAILING_LIST_VOCAB = MEnum(
+# NOTE: an MEnum instance binds to a single quantity definition (its shape is
+# taken from that definition), so it must NOT be shared between quantities
+# with different shapes.  Keep the raw values in a plain list and construct a
+# fresh MEnum per quantity.
+MAILING_LISTS = [
     'fairmat-area-leaders@listen.physik.hu-berlin.de',
     'fairmat-coordinators@listen.physik.hu-berlin.de',
     'fairmat-hq@listen.physik.hu-berlin.de',
@@ -83,7 +90,7 @@ MAILING_LIST_VOCAB = MEnum(
     'fairmat2-area-f@listen.physik.hu-berlin.de',
     'fairmat2-area-g@listen.physik.hu-berlin.de',
     'fairmat2-pi@listen.physik.hu-berlin.de',
-)
+]
 
 INVITED_TO = MEnum(
     'Project Meeting',
@@ -98,8 +105,45 @@ REIMBURSEMENT = MEnum(
 )
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _unique_clean(values) -> list[str]:
+    out: list[str] = []
+    for value in values or []:
+        if value is None:
+            continue
+        cleaned = value.strip() if isinstance(value, str) else value
+        if not cleaned:
+            continue
+        if cleaned not in out:
+            out.append(cleaned)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Sub-sections
 # ---------------------------------------------------------------------------
+
+
+class ExpertiseTerm(ArchiveSection):
+    """Search-indexable mirror of a single expertise keyword.
+
+    The app cannot use the list-valued `expertise` quantity as a search
+    quantity, so `Person.normalize` mirrors it into this repeating
+    subsection with a scalar `value`.
+    """
+
+    m_def = Section(a_eln={'hide': ['value']})
+    value = Quantity(type=str)
+
+
+class MailingListTerm(ArchiveSection):
+    """Search-indexable mirror of a single mailing list subscription."""
+
+    m_def = Section(a_eln={'hide': ['value']})
+    value = Quantity(type=MEnum(MAILING_LISTS))
 
 
 class Affiliation(ArchiveSection):
@@ -270,7 +314,7 @@ class Person(Schema):
         label='FAIRmat Member',
         categories=[UseCaseElnCategory],
         a_eln={
-            'hide': ['lab_id'],
+            'hide': ['lab_id', 'expertise_terms', 'mailing_list_terms'],
         },
     )
 
@@ -308,12 +352,15 @@ class Person(Schema):
         a_eln=ELNAnnotation(component=ELNComponentEnum.StringEditQuantity),
     )
 
-    onboarding_entry = Quantity(
-        type=ArchiveSection,
-        label='Onboarding entry',
+    onboarding_entries = Quantity(
+        type=PIOnboardingQuestionnaire,
+        shape=['*'],
+        label='Onboarding entries',
         description=(
-            'Reference to the PI onboarding questionnaire entry in NOMAD. '
-            'Applicable for PI members only.'
+            'References to the PI onboarding questionnaire entries of this '
+            'member. Filled automatically during processing by matching the '
+            'member email against the NOMAD (Keycloak) account that created '
+            'the questionnaire; additional entries can be linked manually.'
         ),
         a_eln=ELNAnnotation(component=ELNComponentEnum.ReferenceEditQuantity),
     )
@@ -368,12 +415,19 @@ class Person(Schema):
     )
 
     mailing_lists = Quantity(
-        type=MAILING_LIST_VOCAB,
+        type=MEnum(MAILING_LISTS),
         shape=['*'],
         label='Mailing lists',
         description='FAIRmat mailing lists this member is subscribed to. Multiple selections allowed.',
         a_eln=ELNAnnotation(component=ELNComponentEnum.AutocompleteEditQuantity),
     )
+
+    # Hidden mirrors of the list-valued `expertise` and `mailing_lists`
+    # quantities.  The scalar `value` inside these repeating subsections is
+    # what the FAIRmat Members app uses for search, filtering, and columns
+    # (list quantities are not allowed as app search quantities).
+    expertise_terms = SubSection(section_def=ExpertiseTerm, repeats=True)
+    mailing_list_terms = SubSection(section_def=MailingListTerm, repeats=True)
 
     event_invitation = SubSection(
         section_def=EventInvitation,
@@ -388,47 +442,93 @@ class Person(Schema):
         a_eln=ELNAnnotation(component=ELNComponentEnum.StringEditQuantity),
     )
 
+    def _find_onboarding_entries(self, archive, logger) -> list[str]:
+        """Find all PIOnboardingQuestionnaire entries created by this member.
+
+        The member's email is resolved to a NOMAD (Keycloak) account and the
+        entry index is searched for questionnaires whose main author has that
+        user_id.  Runs only server-side; in client/test contexts the lookup
+        is skipped silently.  Questionnaires uploaded on behalf of a member
+        carry the uploader's user_id and are NOT found — link those manually
+        until the schemas carry an explicit user_id quantity.
+        """
+        if not self.email:
+            return []
+        try:
+            from nomad.datamodel import User
+            from nomad.search import search
+
+            user = User.get(email=self.email.strip().lower())
+            if user is None or not user.user_id:
+                logger.info(
+                    'no NOMAD account found for member email; '
+                    'onboarding entries not linked',
+                    member_email=self.email,
+                )
+                return []
+
+            searcher_id = None
+            if archive.metadata is not None and archive.metadata.main_author:
+                searcher_id = archive.metadata.main_author.user_id
+            results = search(
+                owner='all',
+                query={
+                    'section_defs.definition_qualified_name': (
+                        'fairmat_onboarding.schema_packages.'
+                        'schema_package.PIOnboardingQuestionnaire'
+                    ),
+                    'main_author.user_id': user.user_id,
+                },
+                user_id=searcher_id,
+            )
+            return [
+                f'../uploads/{entry["upload_id"]}/archive/{entry["entry_id"]}#/data'
+                for entry in results.data
+            ]
+        except Exception as exc:
+            logger.info(
+                'onboarding entry lookup skipped',
+                member_email=self.email,
+                reason=str(exc),
+            )
+            return []
+
     def normalize(self, archive: 'EntryArchive', logger: 'BoundLogger') -> None:
         super().normalize(archive, logger)
 
+        # Link all onboarding questionnaires of this member (matched via the
+        # Keycloak user_id behind the member email).  Manually added
+        # references are kept; discovered ones are merged in.
+        existing = {
+            getattr(ref, 'm_proxy_value', None)
+            for ref in (self.onboarding_entries or [])
+        }
+        discovered = [
+            url
+            for url in self._find_onboarding_entries(archive, logger)
+            if url not in existing
+        ]
+        if discovered:
+            self.onboarding_entries = list(self.onboarding_entries or []) + discovered
 
-# ---------------------------------------------------------------------------
-# Container schemas produced by parsers
-# ---------------------------------------------------------------------------
+        # Mirror list quantities into the hidden *_terms subsections so the
+        # app can search and display them via a scalar `value` path.
+        self.expertise_terms = [
+            ExpertiseTerm(value=v) for v in _unique_clean(self.expertise)
+        ]
+        self.mailing_list_terms = [
+            MailingListTerm(value=v) for v in _unique_clean(self.mailing_lists)
+        ]
 
-
-class MemberRecord(ArchiveSection):
-    """A single member record used inside FAIRmatMembersFile (parsed from a spreadsheet)."""
-
-    m_def = Section(label_quantity='last_name')
-
-    first_name = Quantity(type=str, label='First name')
-    last_name = Quantity(type=str, label='Last name')
-    email = Quantity(type=str, label='Email')
-    orcid = Quantity(type=str, label='ORCID')
-    institution_name = Quantity(type=str, label='Institution name')
-    role = Quantity(type=FAIRMAT_ROLE_VOCAB, label='Role')
-    area = Quantity(type=FAIRMAT_AREA, label='Area')
-    mailing_lists = Quantity(type=MAILING_LIST_VOCAB, shape=['*'], label='Mailing lists')
-    notes = Quantity(type=str, label='Notes')
-
-
-class FAIRmatMembersFile(Schema):
-    """Container schema produced by the members spreadsheet parser."""
-
-    m_def = Section(
-        label='FAIRmat Members File',
-        categories=[UseCaseElnCategory],
-    )
-
-    members = SubSection(
-        section_def=MemberRecord,
-        label='Members',
-        repeats=True,
-    )
-
-    def normalize(self, archive: 'EntryArchive', logger: 'BoundLogger') -> None:
-        super().normalize(archive, logger)
+        # Derive the entry name from the person's name so it stays meaningful
+        # regardless of how the entry was created or edited.  Without this, a
+        # GUI edit + save drops the file-provided entry_name and NOMAD falls
+        # back to the raw mainfile name (e.g. 'member_Last_First.archive.json').
+        display_name = ' '.join(
+            part for part in (self.first_name, self.last_name) if part
+        ).strip()
+        if display_name and archive.metadata is not None:
+            archive.metadata.entry_name = display_name
 
 
 m_package.__init_metainfo__()
