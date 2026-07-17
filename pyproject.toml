@@ -28,7 +28,11 @@ dependencies = [
     "nomad-lab>=1.4.1",
     "openpyxl>=3.1",
     "pandas>=2.0",
-    "FAIRmat-onboarding @ git+https://github.com/FAIRmat-NFDI/fairmat_onboarding.git",
+    # Not on PyPI.  The commit pin MUST match the fairmat-onboarding pin in
+    # the deployment (fairmat-internal-oasis pyproject.toml) — differing URLs
+    # for the same package make the plugin-test install fail with a
+    # conflicting-URL error.  Bump both together.
+    "fairmat-onboarding @ git+https://github.com/FAIRmat-NFDI/fairmat_onboarding.git@d6539e437b71b7f38b2edf78c4c961bdeaf3637a",
 ]
 
 [project.urls]
@@ -49,8 +53,7 @@ dev = [
 [tool.uv]
 extra-index-url = [
   "https://gitlab.mpcdf.mpg.de/api/v4/projects/2187/packages/pypi/simple",
-]
-    
+]    
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.
 exclude = [
