@@ -11,6 +11,9 @@ env:
   PYTHON_VERSION: 3.12
   UV_SYSTEM_PYTHON: true
 
+permissions:
+  contents: write  # allow GITHUB_TOKEN to push the gh-pages branch
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
