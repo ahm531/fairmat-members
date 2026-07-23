@@ -118,9 +118,7 @@ for _area in FAIRMAT_AREAS:
 
 # The legacy first-period area, resolved from the schema so the exact string
 # stays in sync (used for the dissolved FAIRmat 1 Area E, see F1_TO_F2_AREA).
-_USE_CASES_AREA = next(
-    (a for a in FAIRMAT_AREAS if a.startswith('FAIRmat1')), None
-)
+_USE_CASES_AREA = next((a for a in FAIRMAT_AREAS if a.startswith('FAIRmat1')), None)
 
 # FAIRmat 1 -> FAIRmat 2 area remap for the CSV 'Member' column (data owner):
 #   F1 A/B/C stay A/B/C; F1 D -> F2 E; F1 F -> F2 G; F1 G -> F2 H.
@@ -245,7 +243,7 @@ def parse_invited_to(meet_raw: str, retreat_raw: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def build_roles(get, who: str, warnings: list[str]) -> list[FAIRmatRoleAssignment]:
+def build_roles(get, who: str, warnings: list[str]) -> list[FAIRmatRoleAssignment]:  # noqa: PLR0912
     """Build the fairmat_roles list.
 
     Three sources feed the roles:
@@ -289,9 +287,7 @@ def build_roles(get, who: str, warnings: list[str]) -> list[FAIRmatRoleAssignmen
         area = area_of_token(code)
         if task is None:
             warnings.append(f'{who}: unmapped task leader code {code!r}')
-        roles.append(
-            FAIRmatRoleAssignment(role='Task Leader', task=task, area=area)
-        )
+        roles.append(FAIRmatRoleAssignment(role='Task Leader', task=task, area=area))
         if area:
             covered_areas.add(area)
         add_area_to_union(area)
@@ -302,9 +298,7 @@ def build_roles(get, who: str, warnings: list[str]) -> list[FAIRmatRoleAssignmen
         area = area_of_token(code)
         if task is None:
             warnings.append(f'{who}: unmapped participant task code {code!r}')
-        roles.append(
-            FAIRmatRoleAssignment(role='Participant', task=task, area=area)
-        )
+        roles.append(FAIRmatRoleAssignment(role='Participant', task=task, area=area))
         if area:
             covered_areas.add(area)
         add_area_to_union(area)
@@ -352,7 +346,9 @@ def build_person(row: dict, warnings: list[str]) -> tuple[Person, str]:
             warnings.append(f'{who}: unmapped member type {mtype_raw!r}')
 
     affiliations = []
-    if any(get(c) for c in (COL_AFFILIATION, COL_AFFILIATION_ROR, COL_CITY, COL_COUNTRY)):
+    if any(
+        get(c) for c in (COL_AFFILIATION, COL_AFFILIATION_ROR, COL_CITY, COL_COUNTRY)
+    ):
         affiliations = [
             Affiliation(
                 institution_name=get(COL_AFFILIATION) or None,

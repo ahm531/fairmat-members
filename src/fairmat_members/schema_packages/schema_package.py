@@ -191,8 +191,9 @@ def _area_letter(area: str | None) -> str | None:
         return None
     if area.startswith('FAIRmat1'):
         return 'E1'
-    if area.startswith('Area ') and len(area) > 5:
-        letter = area[5]
+    prefix = 'Area '
+    if area.startswith(prefix) and len(area) > len(prefix):
+        letter = area[len(prefix)]
         if letter.isalpha():
             return letter.upper()
     return None
@@ -769,7 +770,7 @@ class Person(Schema):
         # normalised above (roles, mirrors, entry name, ...).
         self.summary = self._build_summary(display_name)
 
-    def _build_summary(self, display_name: str) -> str:
+    def _build_summary(self, display_name: str) -> str:  # noqa: PLR0912, PLR0915
         """Assemble the read-only rich-text (HTML) overview summary.
 
         Produces a nested, bulleted overview of the member: an identity header,
@@ -802,14 +803,10 @@ class Person(Schema):
             header += f' — {esc(self.member_type)}'
 
         # Header stat line: distinct areas + role/leadership counts.
-        distinct_areas = _unique_clean(
-            r.area for r in (self.fairmat_roles or [])
-        )
+        distinct_areas = _unique_clean(r.area for r in (self.fairmat_roles or []))
         n_roles = len(self.fairmat_roles or [])
         leadership = {'Area Leader', 'Deputy Area Leader', 'Task Leader'}
-        n_lead = sum(
-            1 for r in (self.fairmat_roles or []) if r.role in leadership
-        )
+        n_lead = sum(1 for r in (self.fairmat_roles or []) if r.role in leadership)
         stat_bits = []
         if distinct_areas:
             stat_bits.append(f'{len(distinct_areas)} area(s)')
@@ -839,9 +836,7 @@ class Person(Schema):
         if self.fairmat_roles:
             lead_items, other_items = [], []
             for r in self.fairmat_roles:
-                detail = ' — '.join(
-                    esc(bit) for bit in (r.role, r.area, r.task) if bit
-                )
+                detail = ' — '.join(esc(bit) for bit in (r.role, r.area, r.task) if bit)
                 if not detail:
                     continue
                 (lead_items if r.role in leadership else other_items).append(
@@ -867,9 +862,7 @@ class Person(Schema):
 
         # -- 4. Mailing lists (distribution) ----------------------------------
         if self.mailing_lists:
-            ml_items = [
-                f'<li>{esc(m)}</li>' for m in _unique_clean(self.mailing_lists)
-            ]
+            ml_items = [f'<li>{esc(m)}</li>' for m in _unique_clean(self.mailing_lists)]
             if ml_items:
                 items.append(group('Mailing lists', ml_items))
 
@@ -879,8 +872,12 @@ class Person(Schema):
             for aff in self.affiliations:
                 line_bits = [
                     bit
-                    for bit in (aff.institution_name, aff.department, aff.city,
-                                aff.country)
+                    for bit in (
+                        aff.institution_name,
+                        aff.department,
+                        aff.city,
+                        aff.country,
+                    )
                     if bit
                 ]
                 if not line_bits:
